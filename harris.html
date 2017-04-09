@@ -1,0 +1,285 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <script id="shader-vs" type="x-shader/x-vertex">
+      attribute vec2 aPos;
+      attribute vec2 aTexCoord;
+      varying vec2 vTexCoord;
+      void main(void) {
+        gl_Position = vec4(aPos, 0., 1.); 
+        vTexCoord = aTexCoord;
+      }
+    </script>
+  
+    <script id="shader-fs-show" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform sampler2D uImageSample;
+      varying vec2 vTexCoord;
+		
+      void main() {
+        gl_FragColor = texture2D(uImageSample, vTexCoord);
+      }
+    </script>
+    
+    <script id="shader-fs-calcR" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform sampler2D uImageSample;
+      uniform vec2 uPixelSize;
+      uniform float uTreshold;
+      varying vec2 vTexCoord;
+      
+      void main() {
+        vec2 upLeftCorner = vTexCoord - uPixelSize;
+        vec2 downRightCorner = vTexCoord + uPixelSize;
+        
+        float a11 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(-1, -1)).r) * 255.0;
+        float a12 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(0, -1)).r) * 255.0;
+        float a13 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(1, -1)).r) * 255.0;
+        float a21 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(-1, 0)).r) * 255.0;
+        float a23 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(1, 0)).r) * 255.0;
+        float a31 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(-1, 1)).r) * 255.0;
+        float a32 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(0, 1)).r) * 255.0;
+        float a33 = float(texture2D(uImageSample, vTexCoord + uPixelSize * vec2(1, 1)).r) * 255.0;
+        
+        float Ix = a11 + 2.0 * a21 + a31 - a13 - 2.0 * a23 - a33;
+        float Iy = a11 + 2.0 * a12 + a13 - a31 - 2.0 * a32 - a33;
+        float a1 = Ix * Ix;
+        float a2 = Ix * Iy;
+        float a3 = a2;
+        float a4 = Iy * Iy;
+      
+        float R = (a1 + a4 - a3 - a2) + 0.04 * (a1 + a4) * (a1 + a4);
+        
+        if (R < uTreshold) {
+          R = 0.0;
+        }
+        gl_FragColor = vec4(R, 0, 0, 1);
+      }
+    </script>
+  
+    <script id="shader-fs-findLocalMax" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform sampler2D uImageSample;
+      uniform sampler2D uRSample;
+      uniform vec2 uPixelSize;
+      varying vec2 vTexCoord;
+		
+      void main() {
+        
+        float myR = texture2D(uRSample, vTexCoord).r;
+        
+        bool localMax = myR > 0.0;
+        
+        
+        for (int i = -1; i <= 1; i++) {
+          for (int j = -1; j <= 1; j++) {
+            float r = texture2D(uRSample, vTexCoord + uPixelSize * vec2(i, j)).r;
+            if (myR < r) {
+              localMax = false;
+            }
+          }
+        }
+        
+        
+        
+        if (localMax) {
+          gl_FragColor = vec4(1, 0, 0, 1);
+        } else {
+          gl_FragColor = texture2D(uImageSample, vTexCoord);
+        }
+      }
+    </script>
+  
+    
+    <script>
+      
+      //global vars for simplicity
+      var gl, image, loaded = false;
+      var width, height;
+      var prog_show, prog_calcR, prog_findLocalMax;
+      var FBO;
+      var treshold = 45000000000;
+      
+      function main() {
+        image = new Image();
+        
+        //image.src = "harris.bmp"; 
+        image.onload = function() {
+          init();
+          loaded = true;
+          draw();
+        }
+        image.crossOrigin = "";
+        image.src = "https://raw.githubusercontent.com/JustFreePirate/harris/master/harris.bmp";
+        //"https://c1.staticflickr.com/9/8873/18598400202_3af67ef38f_q.jpg";
+        
+      }
+      
+      function init() {
+        var canvas = document.getElementById('myCanvas');
+        width = image.width;
+        height = image.height;
+        canvas.width = width;
+        canvas.height = height;
+        
+        initGL(canvas);
+        initShaders();
+        
+      }
+      
+      function initGL(canvas) {
+        try { gl = canvas.getContext("experimental-webgl");
+        } catch(e) {}
+        if ( !gl ) {alert("Can't get WebGL"); return;}
+        var ext;
+        try { ext = gl.getExtension("OES_texture_float");
+        } catch(e) {}
+        if ( !ext ) {alert(err + "OES_texture_float extension"); return;}
+      }
+      
+      
+      function initShaders() {
+        var vs = getShader(gl, "shader-vs");
+        var fs_show = getShader(gl, "shader-fs-show");
+        var fs_calcR = getShader(gl, "shader-fs-calcR");
+        var fs_findLocalMax = getShader(gl, "shader-fs-findLocalMax");
+        
+        prog_show = gl.createProgram();
+        gl.attachShader(prog_show, vs);
+        gl.attachShader(prog_show, fs_show);
+        gl.linkProgram(prog_show);
+        
+        prog_calcR = gl.createProgram();
+        gl.attachShader(prog_calcR, vs);
+        gl.attachShader(prog_calcR, fs_calcR);
+        gl.linkProgram(prog_calcR);
+        
+        prog_findLocalMax = gl.createProgram();
+        gl.attachShader(prog_findLocalMax, vs);
+        gl.attachShader(prog_findLocalMax, fs_findLocalMax);
+        gl.linkProgram(prog_findLocalMax);
+      
+
+        if (!gl.getProgramParameter(prog_show, gl.LINK_STATUS) 
+            || !gl.getProgramParameter(prog_calcR, gl.LINK_STATUS)
+            || !gl.getProgramParameter(prog_findLocalMax, gl.LINK_STATUS) ) {
+          alert("Could not initialise show shaders");
+        }
+        
+        prog_show.aPosLoc = gl.getAttribLocation(prog_show, "aPos");
+        prog_show.aTexCoordLoc = gl.getAttribLocation(prog_show, "aTexCoord");
+        gl.enableVertexAttribArray(prog_show.aPosLoc);
+        gl.enableVertexAttribArray(prog_show.aTexCoordLoc);
+        
+        var data = new Float32Array([-1,-1, 0,0,  1,-1, 1,0,  -1,1, 0,1, 1,1, 1,1]);
+        var buffer = gl.createBuffer()
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(prog_show.aPosLoc, 2, gl.FLOAT, gl.FALSE, 16, 0); //[(-1,-1), (1,-1), (-1,1), (1,1)]
+        gl.vertexAttribPointer(prog_show.aTexCoordLoc, 2, gl.FLOAT, gl.FALSE, 16, 8); //[(0,0), (1,0), (0,1), (1,1)]
+        
+        var imgTexture = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, imgTexture);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        
+        var rTexture = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, rTexture);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, new Float32Array(width*height*4));
+        
+        
+        FBO = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, FBO);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rTexture, 0);
+        
+        if( gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE) {
+          alert(err + "FLOAT as the color attachment to an FBO");
+        }
+        
+        
+        prog_show.sampImg = gl.getUniformLocation(prog_show, "uImageSample");
+        
+        prog_calcR.sampImg = gl.getUniformLocation(prog_calcR, "uImageSample");
+        prog_calcR.pixelSize = gl.getUniformLocation(prog_calcR, "uPixelSize");
+        prog_calcR.treshold = gl.getUniformLocation(prog_calcR, "uTreshold");
+        
+        prog_findLocalMax.sampImg = gl.getUniformLocation(prog_findLocalMax, "uImageSample");
+        prog_findLocalMax.sampR = gl.getUniformLocation(prog_findLocalMax, "uRSample");
+        prog_findLocalMax.pixelSize = gl.getUniformLocation(prog_findLocalMax, "uPixelSize");
+        
+        
+        gl.useProgram(prog_show);
+        gl.uniform1i(prog_show.sampImg, 0);
+        
+        gl.useProgram(prog_calcR);
+        gl.uniform1i(prog_calcR.sampImg, 0);
+        gl.uniform2f(prog_calcR.pixelSize, 1.0 / width, 1.0 / height);
+        gl.uniform1f(prog_calcR.treshold, treshold);
+        
+        gl.useProgram(prog_findLocalMax);
+        gl.uniform1i(prog_findLocalMax.sampImg, 0);
+        gl.uniform1i(prog_findLocalMax.sampR, 1);
+        gl.uniform2f(prog_findLocalMax.pixelSize, 1.0 / width, 1.0 / height);
+        
+      }
+      
+      function getShader ( gl, id ){
+        var shaderScript = document.getElementById ( id );
+        var str = "";
+        var k = shaderScript.firstChild;
+        while ( k ){
+          if ( k.nodeType == 3 ) str += k.textContent;
+          k = k.nextSibling;
+        }
+        var shader;
+        if ( shaderScript.type == "x-shader/x-fragment" )
+           shader = gl.createShader ( gl.FRAGMENT_SHADER );
+        else if ( shaderScript.type == "x-shader/x-vertex" )
+           shader = gl.createShader(gl.VERTEX_SHADER);
+        else return null;
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+        if (gl.getShaderParameter(shader, gl.COMPILE_STATUS) == 0)
+          alert(gl.getShaderInfoLog(shader));
+        return shader;
+      }
+      
+      function draw() {
+        gl.viewport(0, 0, width, height);
+        
+        gl.useProgram(prog_calcR);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, FBO); //calc R to rTexture
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        
+        gl.useProgram(prog_findLocalMax);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        
+        //gl.useProgram(prog_show);
+        
+        
+      }
+      
+      
+    </script>
+  
+  
+  </head>
+  
+  <body onload="main()">
+    <canvas id="myCanvas" width="512" height="512"></canvas><br>
+  </body>
+</html> 
