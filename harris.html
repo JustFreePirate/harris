@@ -25,7 +25,7 @@
       precision mediump float;
       uniform sampler2D uImageSample;
       uniform vec2 uPixelSize;
-      uniform float uTreshold;
+      uniform float uThreshold;
       varying vec2 vTexCoord;
       
       void main() {
@@ -50,7 +50,7 @@
       
         float R = (a1 + a4 - a3 - a2) + 0.04 * (a1 + a4) * (a1 + a4);
         
-        if (R < uTreshold) {
+        if (R < uThreshold) {
           R = 0.0;
         }
         gl_FragColor = vec4(R, 0, 0, 1);
@@ -96,22 +96,19 @@
       //global vars for simplicity
       var gl, image, loaded = false;
       var width, height;
-      var prog_show, prog_calcR, prog_findLocalMax;
+      var prog_calcR, prog_findLocalMax;
       var FBO;
-      var treshold = 45000000000;
       
       function main() {
         image = new Image();
         
-        //image.src = "harris.bmp"; 
         image.onload = function() {
           init();
           loaded = true;
-          draw();
+          harris();
         }
         image.crossOrigin = "";
         image.src = "https://raw.githubusercontent.com/JustFreePirate/harris/master/harris.bmp";
-        //"https://c1.staticflickr.com/9/8873/18598400202_3af67ef38f_q.jpg";
         
       }
       
@@ -124,7 +121,6 @@
         
         initGL(canvas);
         initShaders();
-        
       }
       
       function initGL(canvas) {
@@ -140,14 +136,8 @@
       
       function initShaders() {
         var vs = getShader(gl, "shader-vs");
-        var fs_show = getShader(gl, "shader-fs-show");
         var fs_calcR = getShader(gl, "shader-fs-calcR");
         var fs_findLocalMax = getShader(gl, "shader-fs-findLocalMax");
-        
-        prog_show = gl.createProgram();
-        gl.attachShader(prog_show, vs);
-        gl.attachShader(prog_show, fs_show);
-        gl.linkProgram(prog_show);
         
         prog_calcR = gl.createProgram();
         gl.attachShader(prog_calcR, vs);
@@ -160,23 +150,22 @@
         gl.linkProgram(prog_findLocalMax);
       
 
-        if (!gl.getProgramParameter(prog_show, gl.LINK_STATUS) 
-            || !gl.getProgramParameter(prog_calcR, gl.LINK_STATUS)
+        if (!gl.getProgramParameter(prog_calcR, gl.LINK_STATUS)
             || !gl.getProgramParameter(prog_findLocalMax, gl.LINK_STATUS) ) {
           alert("Could not initialise show shaders");
         }
         
-        prog_show.aPosLoc = gl.getAttribLocation(prog_show, "aPos");
-        prog_show.aTexCoordLoc = gl.getAttribLocation(prog_show, "aTexCoord");
-        gl.enableVertexAttribArray(prog_show.aPosLoc);
-        gl.enableVertexAttribArray(prog_show.aTexCoordLoc);
+        prog_calcR.aPosLoc = gl.getAttribLocation(prog_calcR, "aPos");
+        prog_calcR.aTexCoordLoc = gl.getAttribLocation(prog_calcR, "aTexCoord");
+        gl.enableVertexAttribArray(prog_calcR.aPosLoc);
+        gl.enableVertexAttribArray(prog_calcR.aTexCoordLoc);
         
         var data = new Float32Array([-1,-1, 0,0,  1,-1, 1,0,  -1,1, 0,1, 1,1, 1,1]);
         var buffer = gl.createBuffer()
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-        gl.vertexAttribPointer(prog_show.aPosLoc, 2, gl.FLOAT, gl.FALSE, 16, 0); //[(-1,-1), (1,-1), (-1,1), (1,1)]
-        gl.vertexAttribPointer(prog_show.aTexCoordLoc, 2, gl.FLOAT, gl.FALSE, 16, 8); //[(0,0), (1,0), (0,1), (1,1)]
+        gl.vertexAttribPointer(prog_calcR.aPosLoc, 2, gl.FLOAT, gl.FALSE, 16, 0); //[(-1,-1), (1,-1), (-1,1), (1,1)]
+        gl.vertexAttribPointer(prog_calcR.aTexCoordLoc, 2, gl.FLOAT, gl.FALSE, 16, 8); //[(0,0), (1,0), (0,1), (1,1)]
         
         var imgTexture = gl.createTexture();
         gl.activeTexture(gl.TEXTURE0);
@@ -209,25 +198,18 @@
           alert(err + "FLOAT as the color attachment to an FBO");
         }
         
-        
-        prog_show.sampImg = gl.getUniformLocation(prog_show, "uImageSample");
-        
         prog_calcR.sampImg = gl.getUniformLocation(prog_calcR, "uImageSample");
         prog_calcR.pixelSize = gl.getUniformLocation(prog_calcR, "uPixelSize");
-        prog_calcR.treshold = gl.getUniformLocation(prog_calcR, "uTreshold");
+        prog_calcR.threshold = gl.getUniformLocation(prog_calcR, "uThreshold");
         
         prog_findLocalMax.sampImg = gl.getUniformLocation(prog_findLocalMax, "uImageSample");
         prog_findLocalMax.sampR = gl.getUniformLocation(prog_findLocalMax, "uRSample");
         prog_findLocalMax.pixelSize = gl.getUniformLocation(prog_findLocalMax, "uPixelSize");
         
         
-        gl.useProgram(prog_show);
-        gl.uniform1i(prog_show.sampImg, 0);
-        
         gl.useProgram(prog_calcR);
         gl.uniform1i(prog_calcR.sampImg, 0);
         gl.uniform2f(prog_calcR.pixelSize, 1.0 / width, 1.0 / height);
-        gl.uniform1f(prog_calcR.treshold, treshold);
         
         gl.useProgram(prog_findLocalMax);
         gl.uniform1i(prog_findLocalMax.sampImg, 0);
@@ -257,20 +239,19 @@
         return shader;
       }
       
-      function draw() {
+      function harris() {
+        if (!loaded) {return;}
         gl.viewport(0, 0, width, height);
+        var threshold = document.getElementById("threshold").value
         
         gl.useProgram(prog_calcR);
+        gl.uniform1f(prog_calcR.threshold, threshold);
         gl.bindFramebuffer(gl.FRAMEBUFFER, FBO); //calc R to rTexture
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         
         gl.useProgram(prog_findLocalMax);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-        
-        //gl.useProgram(prog_show);
-        
-        
       }
       
       
@@ -281,5 +262,7 @@
   
   <body onload="main()">
     <canvas id="myCanvas" width="512" height="512"></canvas><br>
+    threshold:<input size="15" value="44000000000" id="threshold"><br>
+    <input type="button" value="Go harris!" onclick="harris()"></p>
   </body>
 </html> 
